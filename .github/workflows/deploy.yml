@@ -3,7 +3,7 @@ name: Full Stack Deployment Test
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Позволяет запускать вручную кнопкой
+  workflow_dispatch:
 
 jobs:
   deploy-and-test:
@@ -13,7 +13,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Create .env file from secrets
-        shell: pwsh
+        shell: powershell
         run: |
           @"
           DB_HOST=${{ secrets.DB_HOST }}
@@ -27,20 +27,19 @@ jobs:
           "@ | Out-File -FilePath .env -Encoding utf8
 
       - name: Deploy with Docker Compose
-        shell: pwsh
+        shell: powershell
         run: |
           docker-compose up -d
           Start-Sleep -Seconds 15
           docker-compose ps
 
       - name: Test application and database
-        shell: pwsh
+        shell: powershell
         run: |
           $port = "${{ secrets.APP_PORT }}"
           Write-Host "Testing application on port $port..."
           
           try {
-              # Проверка Healthcheck (замените /health, если у вас другой эндпоинт)
               $health = Invoke-WebRequest -Uri "http://localhost:$port/health" -UseBasicParsing -TimeoutSec 10
               Write-Host "App is healthy. Status: $($health.StatusCode)"
           } catch {
@@ -49,7 +48,7 @@ jobs:
           }
 
       - name: Create test report
-        shell: pwsh
+        shell: powershell
         run: |
           @"
           # Deployment Test Report
@@ -69,7 +68,7 @@ jobs:
 
       - name: Save Docker logs
         if: always()
-        shell: pwsh
+        shell: powershell
         run: |
           docker-compose logs | Out-File -FilePath deployment-logs.txt -Encoding utf8
 
