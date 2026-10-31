@@ -29,16 +29,16 @@ jobs:
       - name: Deploy with Docker Compose
         shell: powershell
         run: |
+          docker-compose down
           docker-compose up -d
           Start-Sleep -Seconds 15
           docker-compose ps
 
-            - name: Test application and database
+      - name: Test application and database
         shell: powershell
         run: |
           $port = "${{ secrets.APP_PORT }}"
-          # Если у вас нет страницы /health, замените ее на / (просто слэш)
-          $url = "http://localhost:$port/health" 
+          $url = "http://localhost:$port/"
           $maxRetries = 10
           $retryCount = 0
           $success = $false
@@ -47,7 +47,6 @@ jobs:
 
           while ($retryCount -lt $maxRetries) {
               try {
-                  # Пытаемся достучаться до сайта
                   $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
                   if ($response.StatusCode -eq 200) {
                       Write-Host "SUCCESS! App is healthy and running."
@@ -63,7 +62,6 @@ jobs:
 
           if (-not $success) {
               Write-Host "ERROR: App failed to start or health check returned an error."
-              # Выведем логи приложения, чтобы понять, почему оно не запустилось
               docker logs app
               exit 1
           }
@@ -75,7 +73,6 @@ jobs:
           # Deployment Test Report
           - Date: $(Get-Date)
           - Status: Success
-          - Port: ${{ secrets.APP_PORT }}
           "@ | Out-File -FilePath test-report.md -Encoding utf8
 
       - name: Save artifacts
@@ -99,4 +96,4 @@ jobs:
         with:
           name: docker-logs
           path: deployment-logs.txt
-          retention-days: 30 
+          retention-days: 30
