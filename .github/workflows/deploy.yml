@@ -33,17 +33,38 @@ jobs:
           Start-Sleep -Seconds 15
           docker-compose ps
 
-      - name: Test application and database
+            - name: Test application and database
         shell: powershell
         run: |
           $port = "${{ secrets.APP_PORT }}"
-          Write-Host "Testing application on port $port..."
-          
-          try {
-              $health = Invoke-WebRequest -Uri "http://localhost:$port/health" -UseBasicParsing -TimeoutSec 10
-              Write-Host "App is healthy. Status: $($health.StatusCode)"
-          } catch {
-              Write-Host "Web application health check failed!"
+          # Если у вас нет страницы /health, замените ее на / (просто слэш)
+          $url = "http://localhost:$port/health" 
+          $maxRetries = 10
+          $retryCount = 0
+          $success = $false
+
+          Write-Host "Waiting for the app to start on $url ..."
+
+          while ($retryCount -lt $maxRetries) {
+              try {
+                  # Пытаемся достучаться до сайта
+                  $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+                  if ($response.StatusCode -eq 200) {
+                      Write-Host "SUCCESS! App is healthy and running."
+                      $success = $true
+                      break
+                  }
+              } catch {
+                  Write-Host "Attempt $($retryCount + 1) failed. App not ready yet. Retrying in 5 seconds..."
+                  Start-Sleep -Seconds 5
+                  $retryCount++
+              }
+          }
+
+          if (-not $success) {
+              Write-Host "ERROR: App failed to start or health check returned an error."
+              # Выведем логи приложения, чтобы понять, почему оно не запустилось
+              docker logs app
               exit 1
           }
 
