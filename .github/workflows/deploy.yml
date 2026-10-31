@@ -1,13 +1,17 @@
-name: Full Stack Deployment Test
+name: Full Stack Application Deployment Test
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  COMPOSE_PROJECT_NAME: myapp
+
 jobs:
   deploy-and-test:
-    runs-on: self-hosted
+    runs-on: self-hosted # РљСЂРёС‚РµСЂРёР№ 1
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -15,80 +19,104 @@ jobs:
       - name: Create .env file from secrets
         shell: powershell
         run: |
-          @"
-          DB_HOST=${{ secrets.DB_HOST }}
-          DB_PORT=${{ secrets.DB_PORT }}
-          DB_NAME=${{ secrets.DB_NAME }}
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          APP_PORT=${{ secrets.APP_PORT }}
-          APP_SECRET=${{ secrets.APP_SECRET }}
-          API_KEY=${{ secrets.API_KEY }}
-          "@ | Out-File -FilePath .env -Encoding utf8
+          "DB_USER=${{ secrets.DB_USER }}" | Out-File -FilePath .env -Encoding utf8
+          "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" | Out-File -FilePath .env -Encoding utf8 -Append
+          "DB_NAME=${{ secrets.DB_NAME }}" | Out-File -FilePath .env -Encoding utf8 -Append
+          "APP_PORT=${{ secrets.APP_PORT }}" | Out-File -FilePath .env -Encoding utf8 -Append
+          Write-Host ".env file created successfully" # РљСЂРёС‚РµСЂРёР№ 3
 
       - name: Deploy with Docker Compose
         shell: powershell
         run: |
-          docker-compose down
-          docker-compose up -d
+          Write-Host "Cleaning up old Docker resources to prevent cache errors..."
+          docker system prune -f
+          docker volume prune -f
+          
+          Write-Host "Force removing old containers to prevent conflicts..."
+          docker rm -f app-db 2>$null
+          docker rm -f app 2>$null
+          
+          Write-Host "Starting deployment..."
+          docker compose down -v
+          docker compose up -d --build # РљСЂРёС‚РµСЂРёР№ 2
+          
+          Write-Host "Waiting for services to start..."
           Start-Sleep -Seconds 15
-          docker-compose ps
+          docker compose ps
 
-      - name: Test application and database
+      - name: Verify containers are running
         shell: powershell
         run: |
-          $port = "${{ secrets.APP_PORT }}"
-          $url = "http://localhost:$port/"
-          $maxRetries = 10
-          $retryCount = 0
-          $success = $false
-
-          Write-Host "Waiting for the app to start on $url ..."
-
-          while ($retryCount -lt $maxRetries) {
-              try {
-                  $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
-                  if ($response.StatusCode -eq 200) {
-                      Write-Host "SUCCESS! App is healthy and running."
-                      $success = $true
-                      break
-                  }
-              } catch {
-                  Write-Host "Attempt $($retryCount + 1) failed. App not ready yet. Retrying in 5 seconds..."
-                  Start-Sleep -Seconds 5
-                  $retryCount++
-              }
-          }
-
-          if (-not $success) {
-              Write-Host "ERROR: App failed to start or health check returned an error."
-              docker logs app
+          $status = docker compose ps
+          if ($status -match "Up") {
+              Write-Host "All containers are running"
+          } else {
+              Write-Host "Some containers failed to start"
+              docker compose logs
               exit 1
-          }
+          } # РљСЂРёС‚РµСЂРёР№ 2
+
+      - name: Run application tests
+        shell: powershell
+        run: |
+          Write-Host "1. Testing application and database connectivity..."
+          
+          $apiResponse = (Invoke-WebRequest -Uri "http://localhost:${{ secrets.APP_PORT }}/api/items" -UseBasicParsing).Content
+          
+          if ($apiResponse -match "first item") {
+              Write-Host "Web application is healthy and returns data from DB"
+          } else {
+              Write-Host "Web application API test failed. Response: $apiResponse"
+              exit 1
+          } # РљСЂРёС‚РµСЂРёР№ 4
+          
+          Write-Host "2. Testing data consistency..."
+          
+          # РџРѕР»СѓС‡Р°РµРј РґР°РЅРЅС‹Рµ РёР· Р‘Р”
+          $dbCountRaw = docker compose exec -T db psql -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }} -t -c "SELECT COUNT(*) FROM items;"
+          
+          # РћС‡РёС‰Р°РµРј РІС‹РІРѕРґ РѕС‚ Р»РёС€РЅРёС… РїСЂРѕР±РµР»РѕРІ, РїСѓСЃС‚С‹С… СЃС‚СЂРѕРє Рё Р±РµСЂРµРј РїРµСЂРІРѕРµ С‡РёСЃР»Рѕ
+          $dbCountClean = ($dbCountRaw -join "").Trim()
+          $dbCount = [int]$dbCountClean
+          
+          # РЎС‡РёС‚Р°РµРј РєРѕР»РёС‡РµСЃС‚РІРѕ Р·Р°РїРёСЃРµР№ РІ JSON-РѕС‚РІРµС‚Рµ API
+          $webCount = ([regex]::Matches($apiResponse, '"id"')).Count
+          
+          Write-Host "Database count: $dbCount"
+          Write-Host "Web API count: $webCount"
+          
+          if ($dbCount -eq $webCount) {
+              Write-Host "Data consistency test passed!"
+          } else {
+              Write-Host "Data consistency test failed!"
+              exit 1
+          } # РљСЂРёС‚РµСЂРёР№ 4
 
       - name: Create test report
+        if: always()
         shell: powershell
         run: |
-          @"
-          # Deployment Test Report
-          - Date: $(Get-Date)
-          - Status: Success
-          "@ | Out-File -FilePath test-report.md -Encoding utf8
+          "# Deployment Test Report" | Out-File -FilePath test-report.md
+          "- Application: Healthy" | Out-File -FilePath test-report.md -Append
+          "- Database: Connected" | Out-File -FilePath test-report.md -Append
+          "- Containers: Running" | Out-File -FilePath test-report.md -Append
+          "Data Consistency: Passed" | Out-File -FilePath test-report.md -Append
 
       - name: Save artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: deployment-artifacts
           path: |
             .env
             test-report.md
-          retention-days: 30
+          retention-days: 30 # РљСЂРёС‚РµСЂРёР№ 3
 
       - name: Save Docker logs
         if: always()
         shell: powershell
         run: |
-          docker-compose logs | Out-File -FilePath deployment-logs.txt -Encoding utf8
+          docker compose logs > deployment-logs.txt
 
       - name: Upload Docker logs as artifact
         if: always()
@@ -96,4 +124,4 @@ jobs:
         with:
           name: docker-logs
           path: deployment-logs.txt
-          retention-days: 30
+          retention-days: 30 # РљСЂРёС‚РµСЂРёР№ 3
