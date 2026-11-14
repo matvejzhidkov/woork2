@@ -125,3 +125,9 @@ jobs:
           name: docker-logs
           path: deployment-logs.txt
           retention-days: 30 # РљСЂРёС‚РµСЂРёР№ 3
+                # ... ваши предыдущие шаги (Checkout, Create .env, docker compose up) ...
+
+      - name: Show Docker Logs if failed
+        if: failure()
+        shell: powershell
+        run: docker compose logs --tail="100"
